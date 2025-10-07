@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import json
 import base64
-import time
+import os
 
 
 def obter_tickers_ibov():
@@ -85,20 +85,51 @@ def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
     
     return df_final
 
+
+def salvar_localmente_particionado(df, pasta_base='../data'):
+    """
+    Recebe um DataFrame, particiona por dia e salva cada partição
+    em formato Parquet em uma estrutura de pastas local.
+    """
+    if df is None or df.empty:
+        print("DataFrame vazio. Nenhum dado para salvar.")
+        return
+
+    datas_unicas = df['data'].dt.date.unique()
+    print(f"\nEncontradas {len(datas_unicas)} datas únicas para particionamento local.")
+
+    for data_particao in datas_unicas:
+        data_str = data_particao.strftime('%Y-%m-%d')
+        print(f"Processando partição: data={data_str}")
+
+        df_particionado = df[df['data'].dt.date == data_particao]
+        caminho_particao = os.path.join(pasta_base, 'raw', f'data={data_str}')
+        
+        try:
+            os.makedirs(caminho_particao, exist_ok=True)
+            caminho_arquivo = os.path.join(caminho_particao, 'dados_b3.parquet')
+            
+            df_particionado.to_parquet(caminho_arquivo, index=False)
+            print(f"  -> [SUCESSO] Partição salva em: {caminho_arquivo}")
+        except Exception as e:
+            print(f"  -> [ERRO] Falha ao salvar a partição localmente: {e}")
+
+
 if __name__ == "__main__":
     
     lista_de_tickers = obter_tickers_ibov()
     resultado_final = baixar_e_tratar_dados_b3(lista_de_tickers, periodo='5d')
 
     if resultado_final is not None:
+        resultado_final['data'] = pd.to_datetime(resultado_final['data'])
         colunas_ordenadas = ['data', 'ticker', 'Open', 'High', 'Low', 'Close', 'Volume']
         resultado_final = resultado_final[colunas_ordenadas]
 
-        print("\n\n--- RESULTADO FINAL CONSOLIDADO ---")
-        print(resultado_final)
-        
-        print("\n--- Informações do DataFrame ---")
-        resultado_final.info()
+        print("\n--- DataFrame final pronto para ser salvo localmente ---")
+        print(resultado_final.head())
+
+        # Chamar a função para salvar os dados localmente
+        salvar_localmente_particionado(resultado_final)
 
         # Salvar o resultado final em um arquivo CSV
         try:
