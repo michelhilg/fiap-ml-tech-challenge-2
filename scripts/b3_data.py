@@ -4,7 +4,8 @@ import requests
 import json
 import base64
 import os
-
+import boto3
+from io import BytesIO 
 
 def obter_tickers_ibov():
     """
@@ -65,7 +66,7 @@ def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
                 continue
 
             if isinstance(dados_ticker.columns, pd.MultiIndex):
-                dados_ticker = dados_ticker.stack(level=1).reset_index()
+                dados_ticker = dados_ticker.stack(level=1, future_stack=True).reset_index()
                 dados_ticker.rename(columns={'level_1': 'Ticker', 'Date': 'data'}, inplace=True)
                 dados_ticker = dados_ticker[['data', 'Open', 'High', 'Low', 'Close', 'Volume']]
                 dados_ticker.set_index('data', inplace=True)
@@ -86,34 +87,37 @@ def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
     return df_final
 
 
-def salvar_localmente_particionado(df, pasta_base='../data'):
+def enviar_para_s3_particionado(df, bucket_name):
     """
-    Recebe um DataFrame, particiona por dia e salva cada partição
-    em formato Parquet em uma estrutura de pastas local.
+    Recebe um DataFrame, particiona por dia e envia cada partição
+    em formato Parquet para a pasta 'raw' do S3.
     """
     if df is None or df.empty:
-        print("DataFrame vazio. Nenhum dado para salvar.")
+        print("DataFrame vazio. Nenhum dado para enviar ao S3.")
         return
 
+    s3_client = boto3.client('s3')
     datas_unicas = df['data'].dt.date.unique()
-    print(f"\nEncontradas {len(datas_unicas)} datas únicas para particionamento local.")
+    print(f"\nEncontradas {len(datas_unicas)} datas únicas para upload no S3.")
 
     for data_particao in datas_unicas:
         data_str = data_particao.strftime('%Y-%m-%d')
-        print(f"Processando partição: data={data_str}")
-
+        print(f"Processando partição S3: data={data_str}")
         df_particionado = df[df['data'].dt.date == data_particao]
-        caminho_particao = os.path.join(pasta_base, 'raw', f'data={data_str}')
+        
+        s3_path = f"raw/data={data_str}/dados_b3.parquet"
         
         try:
-            os.makedirs(caminho_particao, exist_ok=True)
-            caminho_arquivo = os.path.join(caminho_particao, 'dados_b3.parquet')
+            buffer = BytesIO()
+            df_particionado.to_parquet(buffer, index=False)
+            buffer.seek(0)
             
-            df_particionado.to_parquet(caminho_arquivo, index=False)
-            print(f"  -> [SUCESSO] Partição salva em: {caminho_arquivo}")
+            # Envia o buffer para o S3
+            s3_client.put_object(Bucket=bucket_name, Key=s3_path, Body=buffer)
+            print(f"  -> [SUCESSO] Partição enviada para s3://{bucket_name}/{s3_path}")
         except Exception as e:
-            print(f"  -> [ERRO] Falha ao salvar a partição localmente: {e}")
-
+            print(f"  -> [ERRO] Falha ao enviar a partição para o S3: {e}")
+            
 
 if __name__ == "__main__":
     
@@ -128,13 +132,6 @@ if __name__ == "__main__":
         print("\n--- DataFrame final pronto para ser salvo localmente ---")
         print(resultado_final.head())
 
-        # Chamar a função para salvar os dados localmente
-        salvar_localmente_particionado(resultado_final)
-
-        # Salvar o resultado final em um arquivo CSV
-        try:
-            nome_arquivo = "dados_b3_consolidados.csv"
-            resultado_final.to_csv(nome_arquivo, index=False, encoding='utf-8')
-            print(f"\n[SUCESSO] Dados salvos em '{nome_arquivo}'")
-        except Exception as e:
-            print(f"\n[ERRO] Falha ao salvar arquivo CSV: {e}")
+        # Define o nome do seu bucket e chama a função de upload
+        bucket = 'michel-teste-fiap'
+        enviar_para_s3_particionado(resultado_final, bucket)
