@@ -43,12 +43,12 @@ def obter_tickers_ibov():
         return ['PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'MGLU3.SA', 'WEGE3.SA']
     
 
-def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
+def baixar_e_tratar_dados_b3(tickers, periodo='2d', intervalo='1h'):
     """
     Baixa dados para uma lista de tickers, corrige o formato anômalo retornado
     pela biblioteca yfinance e consolida os resultados em um único DataFrame.
     """
-    print(f"\nIniciando download para {len(tickers)} tickers...")
+    print(f"\nIniciando download para {len(tickers)} tickers (Intervalo: {intervalo})...")
     lista_dataframes_corrigidos = []
 
     for ticker_atual in tickers:
@@ -67,7 +67,11 @@ def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
 
             if isinstance(dados_ticker.columns, pd.MultiIndex):
                 dados_ticker = dados_ticker.stack(level=1, future_stack=True).reset_index()
-                dados_ticker.rename(columns={'level_1': 'Ticker', 'Date': 'data'}, inplace=True)
+                
+                # Identifica a coluna de data/hora (pode ser 'Date' ou 'Datetime')
+                date_col_name = 'Datetime' if 'Datetime' in dados_ticker.columns else 'Date'
+                dados_ticker.rename(columns={'level_1': 'Ticker', date_col_name: 'data'}, inplace=True)
+                
                 dados_ticker = dados_ticker[['data', 'Open', 'High', 'Low', 'Close', 'Volume']]
                 dados_ticker.set_index('data', inplace=True)
 
@@ -82,7 +86,10 @@ def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1d'):
         return None
 
     df_final = pd.concat(lista_dataframes_corrigidos).reset_index()
-    df_final.rename(columns={'index': 'data'}, inplace=True)
+    
+    # Padroniza a coluna de data/hora que vem do índice
+    if 'index' in df_final.columns:
+        df_final.rename(columns={'index': 'data'}, inplace=True)
     
     return df_final
 
@@ -97,15 +104,19 @@ def enviar_para_s3_particionado(df, bucket_name):
         return
 
     s3_client = boto3.client('s3')
+    
+    df['data'] = pd.to_datetime(df['data'])
+    
     datas_unicas = df['data'].dt.date.unique()
     print(f"\nEncontradas {len(datas_unicas)} datas únicas para upload no S3.")
 
     for data_particao in datas_unicas:
         data_str = data_particao.strftime('%Y-%m-%d')
         print(f"Processando partição S3: data={data_str}")
+        
         df_particionado = df[df['data'].dt.date == data_particao]
         
-        s3_path = f"raw/data={data_str}/dados_b3.parquet"
+        s3_path = f"raw/data={data_str}/dados_b3_horario.parquet"
         
         try:
             buffer = BytesIO()
@@ -115,11 +126,10 @@ def enviar_para_s3_particionado(df, bucket_name):
                 index=False, 
                 engine='pyarrow', 
                 use_deprecated_int96_timestamps=True
-            )            
+            )           
             
             buffer.seek(0)
             
-            # Envia o buffer para o S3
             s3_client.put_object(Bucket=bucket_name, Key=s3_path, Body=buffer)
             print(f"  -> [SUCESSO] Partição enviada para s3://{bucket_name}/{s3_path}")
         except Exception as e:
@@ -129,16 +139,28 @@ def enviar_para_s3_particionado(df, bucket_name):
 if __name__ == "__main__":
     
     lista_de_tickers = obter_tickers_ibov()
-    resultado_final = baixar_e_tratar_dados_b3(lista_de_tickers, periodo='5d')
+    resultado_final = baixar_e_tratar_dados_b3(lista_de_tickers, periodo='5d', intervalo='1h')
 
     if resultado_final is not None:
+        # Garante que a coluna 'data' seja do tipo datetime
         resultado_final['data'] = pd.to_datetime(resultado_final['data'])
+
+        print("\nConvertendo fuso horário para Brasília (America/Sao_Paulo)...")
+        resultado_final['data'] = resultado_final['data'].dt.tz_convert('America/Sao_Paulo')
+        
         colunas_ordenadas = ['data', 'ticker', 'Open', 'High', 'Low', 'Close', 'Volume']
         resultado_final = resultado_final[colunas_ordenadas]
 
-        print("\n--- DataFrame final pronto para ser salvo localmente ---")
-        print(resultado_final.head())
+        print("\n--- DataFrame final pronto (com horário de Brasília) ---")
+        print(resultado_final.head(500))
 
-        # Define o nome do seu bucket e chama a função de upload
         bucket = 'fiap-fase2-mlet-6'
         enviar_para_s3_particionado(resultado_final, bucket)
+
+        # Salvar o resultado final em um arquivo CSV
+        try:
+            nome_arquivo = "dados_b3_consolidados.csv"
+            resultado_final.to_csv(nome_arquivo, index=False, encoding='utf-8')
+            print(f"\n[SUCESSO] Dados salvos em '{nome_arquivo}'")
+        except Exception as e:
+            print(f"\n[ERRO] Falha ao salvar arquivo CSV: {e}")
