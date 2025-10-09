@@ -109,7 +109,14 @@ def enviar_para_s3_particionado(df, bucket_name):
         
         try:
             buffer = BytesIO()
-            df_particionado.to_parquet(buffer, index=False)
+            
+            df_particionado.to_parquet(
+                buffer, 
+                index=False, 
+                engine='pyarrow', 
+                use_deprecated_int96_timestamps=True
+            )            
+            
             buffer.seek(0)
             
             # Envia o buffer para o S3
@@ -133,5 +140,5 @@ if __name__ == "__main__":
         print(resultado_final.head())
 
         # Define o nome do seu bucket e chama a função de upload
-        bucket = 'michel-teste-fiap'
+        bucket = 'fiap-fase2-mlet-6'
         enviar_para_s3_particionado(resultado_final, bucket)
