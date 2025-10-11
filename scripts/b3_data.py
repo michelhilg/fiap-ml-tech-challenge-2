@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import json
 import base64
-import os
 import boto3
 from io import BytesIO 
 
@@ -143,9 +142,6 @@ def sinalizar_conclusao_upload(bucket_name, data_hoje):
     """
     s3_client = boto3.client('s3')
     
-    # O arquivo _SUCCESS deve estar no mesmo nível que as pastas de partição
-    # para que o prefixo 'raw/' do gatilho funcione.
-    # No entanto, vamos colocá-lo na partição do dia para manter a organização.
     data_str = data_hoje.strftime('%Y-%m-%d')
     s3_path = f"raw/data={data_str}/_SUCCESS"
     
@@ -162,7 +158,6 @@ if __name__ == "__main__":
     resultado_final = baixar_e_tratar_dados_b3(lista_de_tickers, periodo='5d', intervalo='1h')
 
     if resultado_final is not None:
-        # Garante que a coluna 'data' seja do tipo datetime
         resultado_final['data'] = pd.to_datetime(resultado_final['data'])
 
         print("\nConvertendo fuso horário para Brasília (America/Sao_Paulo)...")
