@@ -42,7 +42,7 @@ def obter_tickers_ibov():
         return ['PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'MGLU3.SA', 'WEGE3.SA']
     
 
-def baixar_e_tratar_dados_b3(tickers, periodo='2d', intervalo='1h'):
+def baixar_e_tratar_dados_b3(tickers, periodo='5d', intervalo='1h'):
     """
     Baixa dados para uma lista de tickers, corrige o formato anômalo retornado
     pela biblioteca yfinance e consolida os resultados em um único DataFrame.
