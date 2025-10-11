@@ -134,6 +134,26 @@ def enviar_para_s3_particionado(df, bucket_name):
             print(f"  -> [SUCESSO] Partição enviada para s3://{bucket_name}/{s3_path}")
         except Exception as e:
             print(f"  -> [ERRO] Falha ao enviar a partição para o S3: {e}")
+
+
+def sinalizar_conclusao_upload(bucket_name, data_hoje):
+    """
+    Cria e envia um arquivo vazio _SUCCESS para o S3 para sinalizar
+    o fim do carregamento e acionar o pipeline.
+    """
+    s3_client = boto3.client('s3')
+    
+    # O arquivo _SUCCESS deve estar no mesmo nível que as pastas de partição
+    # para que o prefixo 'raw/' do gatilho funcione.
+    # No entanto, vamos colocá-lo na partição do dia para manter a organização.
+    data_str = data_hoje.strftime('%Y-%m-%d')
+    s3_path = f"raw/data={data_str}/_SUCCESS"
+    
+    try:
+        s3_client.put_object(Bucket=bucket_name, Key=s3_path, Body=b'')
+        print(f"\n[SUCESSO] Arquivo de sinalização enviado para s3://{bucket_name}/{s3_path}")
+    except Exception as e:
+        print(f"\n[ERRO] Falha ao enviar arquivo de sinalização: {e}")
             
 
 if __name__ == "__main__":
@@ -157,10 +177,7 @@ if __name__ == "__main__":
         bucket = 'fiap-fase2-mlet-6'
         enviar_para_s3_particionado(resultado_final, bucket)
 
-        # Salvar o resultado final em um arquivo CSV
-        try:
-            nome_arquivo = "dados_b3_consolidados.csv"
-            resultado_final.to_csv(nome_arquivo, index=False, encoding='utf-8')
-            print(f"\n[SUCESSO] Dados salvos em '{nome_arquivo}'")
-        except Exception as e:
-            print(f"\n[ERRO] Falha ao salvar arquivo CSV: {e}")
+        # Marcação de sucesso
+        if not resultado_final.empty:
+            data_mais_recente = resultado_final['data'].max().date()
+            sinalizar_conclusao_upload(bucket, data_mais_recente)
